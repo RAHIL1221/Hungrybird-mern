@@ -9,45 +9,86 @@ const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
+const path = require('path');
 
 const connectDB = require('./config/db');
 const errorHandler = require('./middleware/error');
 
 const app = express();
 const server = http.createServer(app);
+
+console.log("Server starting...");
+
+//  Allowed Origins (Production Safe)
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  process.env.CUSTOMER_URL
+].filter(Boolean);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true); // allow Postman / mobile apps
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      console.log("CORS blocked:", origin);
+      return callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+};
+
+// Apply CORS
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+// Socket.io setup
 const io = new Server(server, {
-  cors: { origin: [process.env.CLIENT_URL, process.env.CUSTOMER_URL || 'http://localhost:3001'], credentials: true },
+  cors: {
+    origin: allowedOrigins,
+    credentials: true
+  }
 });
 
 app.set('io', io);
 
-// Connect DB
-connectDB();
+// Connect Database
+(async () => {
+  try {
+    await connectDB();
+    console.log(" MongoDB connected");
+  } catch (err) {
+    console.error("DB connection failed:", err.message);
+  }
+})();
 
-// Security middleware
+// Security Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
-app.use(cors({ origin: [process.env.CLIENT_URL, process.env.CUSTOMER_URL || 'http://localhost:3001'], credentials: true }));
 app.use(mongoSanitize());
 app.use(compression());
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve uploaded files as static - MUST be before other middleware
-const path = require('path');
-app.use('/uploads', cors(), express.static(path.join(__dirname, 'uploads')));
-console.log('📁 Static files served from:', path.join(__dirname, 'uploads'));
+// Logging (only in development)
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+}
 
-if (process.env.NODE_ENV === 'development') app.use(morgan('dev'));
+// Static files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+console.log('📁 Static files:', path.join(__dirname, 'uploads'));
 
-// Rate limiting - only in production or with higher limits in development
+// Rate Limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW || 15) * 60 * 1000,
-  max: parseInt(process.env.RATE_LIMIT_MAX || 1000), // Increased default to 1000
-  message: { success: false, message: 'Too many requests, please try again later' },
-  skip: (req) => process.env.NODE_ENV === 'development', // Skip rate limiting in development
+  max: parseInt(process.env.RATE_LIMIT_MAX || 100),
+  message: { success: false, message: 'Too many requests, try again later' }
 });
 app.use('/api/', limiter);
 
@@ -68,27 +109,30 @@ app.use('/api/delivery', require('./routes/delivery'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/settings', require('./routes/settings'));
 
-app.get('/api/health', (req, res) => res.json({ status: 'OK', timestamp: new Date() }));
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date() });
+});
 
-// Test endpoint to check uploads
-app.get('/api/test-image', (req, res) => {
-  res.json({ 
-    message: 'Test image URL', 
-    testUrl: 'http://localhost:5000/uploads/1776756508401-safari top.jpg',
-    note: 'Try accessing this URL directly in browser'
+// Socket events
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+
+  socket.on('join:admin', () => socket.join('admin-room'));
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
   });
 });
 
-// Socket.io
-io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-  socket.on('join:admin', () => socket.join('admin-room'));
-  socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
-});
-
+// Error Handler (LAST)
 app.use(errorHandler);
 
+// Start server
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`));
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT} (${process.env.NODE_ENV})`);
+});
 
 module.exports = { app, io };
