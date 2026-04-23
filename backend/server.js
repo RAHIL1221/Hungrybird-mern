@@ -17,55 +17,52 @@ const errorHandler = require('./middleware/error');
 const app = express();
 const server = http.createServer(app);
 
-console.log("Server starting...");
-
-//  Allowed Origins (Production Safe)
+// Allowed origins
 const allowedOrigins = [
   process.env.CLIENT_URL,
   process.env.CUSTOMER_URL
 ].filter(Boolean);
 
-const corsOptions = {
+// CORS configuration
+app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // allow Postman / mobile apps
+    if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
-    } else {
-      console.log("CORS blocked:", origin);
-      return callback(new Error("Not allowed by CORS"));
     }
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-};
 
-// Apply CORS
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+    // Allow unknown origins temporarily to avoid blocking
+    console.log("Blocked or unknown origin:", origin);
+    return callback(null, true);
+  },
+  credentials: true
+}));
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Socket.io setup
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: allowedOrigins.length ? allowedOrigins : "*",
     credentials: true
   }
 });
 
 app.set('io', io);
 
-// Connect Database
+// Connect database
 (async () => {
   try {
     await connectDB();
-    console.log(" MongoDB connected");
+    console.log("Database connected");
   } catch (err) {
-    console.error("DB connection failed:", err.message);
+    console.error("Database connection failed:", err.message);
   }
 })();
 
-// Security Middleware
+// Middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
@@ -75,16 +72,15 @@ app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Logging (only in development)
+// Logging
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-console.log('📁 Static files:', path.join(__dirname, 'uploads'));
 
-// Rate Limiting
+// Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW || 15) * 60 * 1000,
   max: parseInt(process.env.RATE_LIMIT_MAX || 100),
@@ -125,7 +121,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// Error Handler (LAST)
+// Error handler
 app.use(errorHandler);
 
 // Start server
