@@ -1,11 +1,15 @@
 import { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { authAPI } from '../../api';
 import toast from 'react-hot-toast';
 
 export default function Profile() {
   const { user, updateUser } = useAuth();
-  const [activeTab, setActiveTab] = useState('profile');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const fromCart = location.state?.tab === 'addresses';
+  const [activeTab, setActiveTab] = useState(location.state?.tab || 'profile');
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: user?.name || '',
@@ -70,6 +74,7 @@ export default function Profile() {
       toast.success('Address added');
       setShowAddressModal(false);
       setAddressForm({ label: '', street: '', city: '', state: '', zipCode: '', isDefault: false });
+      if (fromCart) navigate('/cart');
     } catch (err) {
       toast.error('Failed to add address');
     } finally {
