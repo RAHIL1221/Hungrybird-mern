@@ -51,6 +51,12 @@ export default function Cart() {
       return;
     }
 
+    if (!user.addresses?.length) {
+      toast.error('Please add a delivery address first');
+      navigate('/profile', { state: { tab: 'addresses' } });
+      return;
+    }
+
     if (!selectedAddress) {
       toast.error('Please select a delivery address');
       return;
@@ -141,6 +147,18 @@ export default function Cart() {
               ))}
             </div>
           </div>
+
+          {user && !user.addresses?.length && (
+            <div className="card" style={{ padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>No delivery address</div>
+                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Add an address to proceed with checkout</div>
+              </div>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/profile', { state: { tab: 'addresses' } })}>
+                + Add Address
+              </button>
+            </div>
+          )}
 
           {user && user.addresses?.length > 0 && (
             <div className="card">
